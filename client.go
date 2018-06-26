@@ -8,25 +8,27 @@ import (
 	"os"
 	"strings"
 
+	driver "github.com/arsonistgopher/go-netconf/drivers/driver"
+	junosdriver "github.com/arsonistgopher/go-netconf/drivers/junos"
 	sshdriver "github.com/arsonistgopher/go-netconf/drivers/ssh"
 
 	"golang.org/x/crypto/ssh"
 )
 
-const versionstring string = "0.2"
+const versionstring string = "0.3"
 
 func main() {
 
 	var cleanoutput = flag.Bool("cleanoutput", false, "Remove newline characters from XML")
 	var version = flag.Bool("version", false, "Show version for code")
 	var targethost = flag.String("targethost", "", "Target IPv4 or FQDN hostname of a NETCONF node")
-	/*var transport = */ flag.String("transport", "ssh", "Transport mode (NOT IMPLEMENTED YET)")
+	var transport = flag.String("transport", "ssh", "Transport mode, either 'ssh' or 'junos'")
 	var envelope = flag.String("envelope", "", "XML Envelope")
 	var envelopefile = flag.String("envelopefile", "", "XML envelope file path")
 	var username = flag.String("username", "", "Username")
 	var password = flag.String("password", "", "Password")
 	var port = flag.Int("port", 830, "Port for accessing NETCONF")
-	/*var sshkey = */ flag.String("sshkey", "", "SSHKey for accessing node (NOT IMPLEMENTED YET)")
+	/*var sshkey = */ flag.String("sshkey", "", "Path to SSHKey for accessing node (NOT IMPLEMENTED YET)")
 	flag.Parse()
 
 	// If version has been requested
@@ -35,18 +37,37 @@ func main() {
 		os.Exit(0)
 	}
 
-	nc := sshdriver.New()
-	nc.Host = *targethost
-	nc.Port = *port
+	// Dummy interface var ready for loading from inputs
+	var nconf driver.Driver
 
-	// Sort yourself out with SSH. Easiest to do that here.
-	nc.SSHConfig = &ssh.ClientConfig{
-		User:            *username,
-		Auth:            []ssh.AuthMethod{ssh.Password(*password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	switch *transport {
+	case "ssh":
+		d := driver.New(sshdriver.New())
+
+		nc := d.(*sshdriver.DriverSSH)
+
+		nc.Host = *targethost
+		nc.Port = *port
+
+		// Sort yourself out with SSH. Easiest to do that here.
+		nc.SSHConfig = &ssh.ClientConfig{
+			User:            *username,
+			Auth:            []ssh.AuthMethod{ssh.Password(*password)},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		}
+
+		nconf = nc
+
+	case "junos":
+		d := driver.New(junosdriver.New())
+
+		nc := d.(*junosdriver.DriverJunos)
+
+		nconf = nc
 	}
+	// Forceful type assertion to make sure our specific chosen transport implements the driver interface{}
 
-	err := nc.Dial()
+	err := nconf.Dial()
 
 	if err != nil {
 		log.Fatal(err)
@@ -67,7 +88,7 @@ func main() {
 		netconfcall = *envelope
 	}
 
-	reply, err := nc.SendRaw(netconfcall)
+	reply, err := nconf.SendRaw(netconfcall)
 	if err != nil {
 		panic(err)
 	}
